@@ -1,0 +1,19 @@
+GIT
+  remote: git://github.com/lian/bitcoin-ruby.git
+  revision: 0e58a0b1e58bacc922f067a6d227046de70f1933
+  specs:
+    bitcoin-ruby (0.0.6)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    ffi (1.9.6)
+    pkcs11 (0.2.4)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  bitcoin-ruby!
+  ffi
+  pkcs11
