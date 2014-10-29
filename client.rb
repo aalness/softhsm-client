@@ -15,45 +15,50 @@ def get_session(pin, rw=false)
   session
 end
 
-# Generate AES256 secret
-def generate_master(session)
+def generate_wrapper(session)
   session.generate_key(:AES_KEY_GEN, :LABEL => 'master key', :VALUE_LEN => 256>>3, :TOKEN => true)
 end
 
-# Fetch a handle to the secret
-def fetch_master(session)
+def fetch_wrapper(session)
+  pub_key, priv_key = nil, nil
   session.find_objects do |obj|
     return obj if obj[:LABEL] == 'master key'
   end
 end
 
-# Encrypt a Bitcoin key
-def encrypt_bitcoin_key(session, master_key, bitcoin_key)
-  iv = SecureRandom.random_bytes
-  ciphertxt = session.encrypt({:AES_CBC => iv}, master_key, bitcoin_key.priv)
-  [ iv, ciphertxt ]
-end
-
-# Decrypt a Bitcoin key
-def decrypt_bitcoin_key(session, master_key, iv, encrypted_bitcoin_key)
-  session.decrypt({:AES_CBC => iv}, master_key, encrypted_bitcoin_key)
-end
-
+# Start session
 session = get_session('1234', true)
 
-# Uncomment to create the master secret
-#master_key = generate_master(session)
-master_key = fetch_master(session)
+# Uncomment to create the wrapper key
+#wrapper_key = generate_wrapper(session)
+wrapper_key = fetch_wrapper(session)
 
-# Generate a key
-key = Bitcoin::Key.generate
-puts "Generated new private key: #{key.priv}"
-# Encrypt a key
-iv, encrypted_key = encrypt_bitcoin_key(session, master_key, key)
-puts "Encrypted private key: #{encrypted_key.unpack('H*').first}"
-# Decrypt a key
-decrypted_key = decrypt_bitcoin_key(session, master_key, iv, encrypted_key)
-key = Bitcoin::Key.new(decrypted_key)
-puts "Re-created private key: #{key.priv}"
+# Generate a Bitcoin key pair
+puts "Generating key pair"
+group = OpenSSL::PKey::EC::Group.new('secp256k1')
+pub_key, priv_key = session.generate_key_pair(:EC_KEY_PAIR_GEN,
+                                              {:VERIFY=>true, :EC_PARAMS=>group.to_der},
+                                              {:ID=>'bitcoin', :SIGN=>true, :EXTRACTABLE=>true})
+ec_point = pub_key[:EC_POINT].unpack("H1H1H*").last # hexify, trim leading 2 bytes which I guess are type and size?
+key = Bitcoin::Key.new(nil, ec_point); key.instance_eval{ @pubkey_compressed = true };
+puts "Address: #{key.addr}"
+
+# Export wrapped private key
+puts "Wrapping private key"
+wrapped_key_value = session.wrap_key(:AES_KEY_WRAP, wrapper_key, priv_key)
+puts "Encrypted private key: #{wrapped_key_value.unpack("H*").first}"
+
+# Unwrap private key and return a handle to it
+puts "Unwrapping private key"
+priv_key = session.unwrap_key(:AES_KEY_WRAP, wrapper_key, wrapped_key_value, :CLASS=>CKO_PRIVATE_KEY, :KEY_TYPE=>CKK_EC, :SIGN=>true)
+
+# Sign the message
+puts "Signing text"
+signature = "\03"+session.sign(:ECDSA, priv_key, "oh hey there")
+puts "Signature: #{signature.unpack("H*").first}"
+
+# Verify the message
+key.verify_message([signature].pack("m0"), "oh hey there")
+puts "Signature verified"
 
 session.logout
