@@ -6,6 +6,7 @@ include Bitcoin::Builder
 
 # Using https://github.com/opendnssec/SoftHSMv2
 PATH_TO_VENDOR_CRYPTOKI = '/usr/local/lib/softhsm/libsofthsm2.so'
+MASTER_KEY_LABEL = 'foobar'
 
 def get_session(pin, rw=false)
   flags = CKF_SERIAL_SESSION
@@ -17,13 +18,13 @@ def get_session(pin, rw=false)
 end
 
 def generate_wrapper(session)
-  session.generate_key(:AES_KEY_GEN, :LABEL => 'master key', :VALUE_LEN => 256>>3, :TOKEN => true)
+  session.generate_key(:AES_KEY_GEN, :LABEL => MASTER_KEY_LABEL, :VALUE_LEN => 256>>3, :TOKEN => true)
 end
 
 def fetch_wrapper(session)
   pub_key, priv_key = nil, nil
   session.find_objects do |obj|
-    return obj if obj[:LABEL] == 'master key'
+    return obj if obj[:LABEL] == MASTER_KEY_LABEL
   end
 end
 
@@ -50,7 +51,7 @@ puts "Generating key pair"
 group = OpenSSL::PKey::EC::Group.new('secp256k1')
 pub_key, priv_key = session.generate_key_pair(:EC_KEY_PAIR_GEN,
                                               {:VERIFY=>true, :EC_PARAMS=>group.to_der},
-                                              {:ID=>'bitcoin', :SIGN=>true, :EXTRACTABLE=>true})
+                                              {:SIGN=>true, :EXTRACTABLE=>true})
 ec_point = pub_key[:EC_POINT].unpack("H1H1H*").last # hexify, trim leading 2 bytes which I guess are type and size?
 key = Bitcoin::Key.new(nil, ec_point); key.instance_eval{ @pubkey_compressed = true };
 puts "Address: #{key.addr}"
@@ -58,7 +59,7 @@ puts "Address: #{key.addr}"
 # Export wrapped private key
 puts "Wrapping private key"
 wrapped_key_value = session.wrap_key(:AES_KEY_WRAP, wrapper_key, priv_key)
-puts "Encrypted private key: #{wrapped_key_value.unpack("H*").first}"
+puts "Encrypted private key: #{[wrapped_key_value].pack("m0")}"
 
 # Unwrap private key and return a handle to it
 puts "Unwrapping private key"
