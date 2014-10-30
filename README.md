@@ -1,4 +1,4 @@
 softhsm-client
 ==============
 
-Playing around with SoftHSM (https://www.opendnssec.org/softhsm/)
+Playing around with Bitcoin + SoftHSM (https://www.opendnssec.org/softhsm/)

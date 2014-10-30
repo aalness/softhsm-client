@@ -2,6 +2,7 @@ require "rubygems"
 require "pkcs11"
 require "bitcoin"
 include PKCS11
+include Bitcoin::Builder
 
 # Using https://github.com/opendnssec/SoftHSMv2
 PATH_TO_VENDOR_CRYPTOKI = '/usr/local/lib/softhsm/libsofthsm2.so'
@@ -24,6 +25,17 @@ def fetch_wrapper(session)
   session.find_objects do |obj|
     return obj if obj[:LABEL] == 'master key'
   end
+end
+
+# Create a tx that sends to self based on a fake previous output
+def create_tx(addr, value)
+  new_tx = Bitcoin::Protocol::Tx.new
+  txout = Bitcoin::Protocol::TxOut.value_to_address(value, addr)
+  new_tx = Bitcoin::Protocol::Tx.new(new_tx.to_payload)
+  txin = Bitcoin::Protocol::TxIn.new(new_tx.binary_hash, 0, txout)
+  new_tx.add_in txin
+  new_tx.add_out txout
+  new_tx
 end
 
 # Start session
@@ -52,13 +64,22 @@ puts "Encrypted private key: #{wrapped_key_value.unpack("H*").first}"
 puts "Unwrapping private key"
 priv_key = session.unwrap_key(:AES_KEY_WRAP, wrapper_key, wrapped_key_value, :CLASS=>CKO_PRIVATE_KEY, :KEY_TYPE=>CKK_EC, :SIGN=>true)
 
-# Sign the message
-puts "Signing text"
-signature = "\03"+session.sign(:ECDSA, priv_key, "oh hey there")
-puts "Signature: #{signature.unpack("H*").first}"
+# Create tx
+tx = create_tx(key.addr, 50000)
+sighash = tx.signature_hash_for_input(0, tx.out[0].script)
 
-# Verify the message
-key.verify_message([signature].pack("m0"), "oh hey there")
-puts "Signature verified"
+# Sign the tx
+puts "Signing tx"
+signature = session.sign(:ECDSA, priv_key, sighash)
+# Poor-man's DER encoded signature, see: http://crypto.stackexchange.com/a/1797
+signature = "\x30\x44\x02\x20" + signature.slice(0, 32) + "\x02\x20" + signature.slice(32, 32)
+tx.in[0].script_sig = Bitcoin::Script.to_signature_pubkey_script(signature, [key.pub].pack("H*"))
+
+# Verify the signature
+if tx.verify_input_signature(0, tx.out[0].script)
+  puts "Signature verified"
+else
+  raise "Nope :("
+end
 
 session.logout
